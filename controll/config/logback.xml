@@ -1,0 +1,35 @@
+<?xml version='1.0' encoding='utf-8'?>
+<configuration scan="true" scanPeriod="300 seconds">
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+	    <charset>UTF-8</charset>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] TOC %-5level %logger{32} - %msg %n</pattern>
+        </encoder>
+    </appender>
+
+    <appender name="FILETEXT" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>/home/pi/display/controll/log/error.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <!-- daily rollover -->
+            <fileNamePattern>/home/pi/display/controll/log/archived/af.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+            <timeBasedFileNamingAndTriggeringPolicy
+                class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                <!-- or whenever the file size reaches 100MB -->
+                <maxFileSize>10MB</maxFileSize>
+            </timeBasedFileNamingAndTriggeringPolicy>
+            <!-- keep 30 days' worth of history -->
+            <maxHistory>5</maxHistory>
+        </rollingPolicy>
+
+        <encoder class="ch.qos.logback.core.encoder.LayoutWrappingEncoder">
+            <charset>UTF-8</charset>
+            <layout class="ch.qos.logback.classic.PatternLayout">
+                <pattern>[%d{YYYY-MM-dd HH:mm:ss.SSS}] %-5level %logger{32} %msg %n</pattern>
+            </layout>           
+        </encoder>
+    </appender> 
+
+    <root level="INFO">
+        <appender-ref ref="FILETEXT" />     
+    </root>
+</configuration>

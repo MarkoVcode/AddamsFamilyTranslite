@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+
+<configuration>
+  <system/>
+  <properties fileName="sensor.1w.properties"/>
+  <properties fileName="application.properties"/>
+  <properties fileName="toc.properties"/>
+  <properties fileName="audio.properties"/>
+</configuration>
