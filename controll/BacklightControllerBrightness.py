@@ -14,12 +14,58 @@ C_3 = 15
 C_4 = 16
 C_5 = 5
 C_6 = 4
-C_7 = 1
+C_7 = 18
 C_8 = 2
+
+#HEADER 3:
+E_3 = 6
+#HEADER 4:
+E_4 = 3
+#HEADER 2:
+E_2 = 12
+#HEADER 1:
+E_1 = 11
+
 
 # Open SPI bus
 spi = spidev.SpiDev()
 spi.open(0,0)
+
+brightE1 = 0
+brightE2 = 0
+brightE3 = 0
+brightE4 = 0
+
+def EBrightness():
+  global brightE1
+  global brightE2
+  global brightE3
+  global brightE4
+  retVal = False
+  conn=sqlite3.connect('db/settings.db')
+  curs=conn.cursor()
+  curs.execute("SELECT * FROM af_ebrightvalues")
+  for row in curs:
+        if(row[1] == 'E1'):
+          if(brightE1 != row[2]):
+            brightE1 = row[2]
+            retVal = True
+        if(row[1] == 'E2'):
+          if(brightE2 != row[2]):
+            brightE2 = row[2]
+            retVal = True
+        if(row[1] == 'E3'):
+          if(brightE3 != row[2]):
+            brightE3 = row[2]
+            retVal = True
+        if(row[1] == 'E4'):
+          if(brightE4 != row[2]):
+            brightE4 = row[2]
+            retVal = True
+  conn.close()
+  return retVal
+
+
 
 # Function to read SPI data from MCP3008 chip
 # Channel must be an integer 0-7
@@ -173,6 +219,7 @@ def ConvertToBrightness(data):
   curs.execute("SELECT value FROM af_overrides where paramName='backlightBrightness'")
   setting = curs.fetchone()
   z = setting[0]
+  conn.close()
   if z == 0:
      if data >=  850:
         return 10
@@ -192,6 +239,8 @@ def ConvertToBrightness(data):
         return 220
      else:
         return 0
+  elif z == -1:
+     return 0
   else:
      return z
 
@@ -205,6 +254,7 @@ amp.set_volume(0)
 
 while True:
 	z = ConvertToBrightness(ReadChannel(light_channel))
+	EBrightness()
         piglow.led(C_1,z)
         piglow.led(C_2,z)
         piglow.led(C_3,z)
@@ -213,8 +263,12 @@ while True:
         piglow.led(C_6,z)
         piglow.led(C_7,z)
         piglow.led(C_8,z)
+        piglow.led(E_1,brightE1)
+        piglow.led(E_2,brightE2)
+        piglow.led(E_3,brightE3)
+        piglow.led(E_4,brightE4)
         piglow.show()
-        time.sleep(0.5)
+        time.sleep(0.1)
         if doRandomBlink():
             disturbOn(getRandomLedChannel(),z)
         if doRandomEffect():
