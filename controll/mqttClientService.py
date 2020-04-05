@@ -32,7 +32,8 @@ def send_confirmation(topicPath, topic, message):
 ############
 def execute_request(item, value):
     if item in ITEMS_AD:
-        if ((value >= 0 ) & (value <= 255)):
+        print(value)
+        if 0 <= value <= 255:
             print("the value is valid AD - execute")
             return True
         else:
