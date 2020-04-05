@@ -37,12 +37,14 @@ def execute_request(item, value):
             print("the value is valid AD - execute")
             return True
         else:
+            print("the value is not between 0 and 255")
             return False
     elif item in ITEMS_LOGICAL:
         if value in VALID_ON_OFF_VALUES:
             print("the value is valid LOGIC - execute")
             return True
         else:
+            print("the value is not ON or OFF")
             return False
 
 
