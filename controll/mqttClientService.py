@@ -51,6 +51,10 @@ def send_confirmation(topicPath, topic, message):
     client.publish("stat/" + DEVICE_NAME + "/RESULT",resultMessage)
 
 ############
+def send_telemetry():
+    client.publish("tele/" + DEVICE_NAME + "/LWT", "Online")
+
+############
 def execute_request(item, value):
     if item in ITEMS_AD:
         if 0 <= int(value) <= 255:
@@ -118,6 +122,8 @@ client.subscribe("cmnd/TRANSLITE-1/EXT-BRIGHT-CH4")
 client.subscribe("cmnd/TRANSLITE-1/BCKL-BRIGHT")
 client.subscribe("cmnd/TRANSLITE-1/BCKL-AUTOMODE")
 client.subscribe("cmnd/TRANSLITE-1/VOLUME")
+
+send_telemetry()
 
 while True:
 	time.sleep(0.1) # wait
