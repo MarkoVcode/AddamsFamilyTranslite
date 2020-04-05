@@ -57,6 +57,8 @@ def send_telemetry():
 ############
 def execute_request(item, value):
     if item in ITEMS_AD:
+        values = value.split(",")
+        value = values[0]
         if 0 <= int(value) <= 255:
             print("the value is valid AD - execute")
             return setADBrightness(item, value)
