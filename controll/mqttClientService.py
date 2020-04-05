@@ -1,11 +1,32 @@
 import paho.mqtt.client as mqtt #import the client1
 import time
+import piglow
 
 DEVICE_NAME="TRANSLITE-1"
 BROKER_ADDRESS="192.168.1.7"
 ITEMS_AD=["EXT-BRIGHT-CH1", "EXT-BRIGHT-CH2", "EXT-BRIGHT-CH3", "EXT-BRIGHT-CH4", "BCKL-BRIGHT", "VOLUME"]
 ITEMS_LOGICAL=["BCKL-AUTOMODE"]
 VALID_ON_OFF_VALUES=["ON", "OFF"]
+
+#Main display 
+C_1 = 13
+C_2 = 14
+C_3 = 15
+C_4 = 16
+C_5 = 5
+C_6 = 4
+C_7 = 18
+C_8 = 2
+
+#External LED
+#HEADER 3:
+E_3 = 6
+#HEADER 4:
+E_4 = 3
+#HEADER 2:
+E_2 = 12
+#HEADER 1:
+E_1 = 11
 
 ############
 def on_message(client, userdata, message):
@@ -32,10 +53,9 @@ def send_confirmation(topicPath, topic, message):
 ############
 def execute_request(item, value):
     if item in ITEMS_AD:
-        print(value)
         if 0 <= int(value) <= 255:
             print("the value is valid AD - execute")
-            return True
+            return setADBrightness(item, value)
         else:
             print("the value is not between 0 and 255")
             return False
@@ -47,6 +67,42 @@ def execute_request(item, value):
             print("the value is not ON or OFF")
             return False
 
+def setADBrightness(item, value):
+    if item == 'BCKL-BRIGHT':
+        setScreenBrightness(value)
+    elif item == 'EXT-BRIGHT-CH1':
+        setChannelBrightness("CH1", value)
+    elif item == 'EXT-BRIGHT-CH2':
+        setChannelBrightness("CH2", value)
+    elif item == 'EXT-BRIGHT-CH3':
+        setChannelBrightness("CH3", value)
+    elif item == 'EXT-BRIGHT-CH4':
+        setChannelBrightness("CH4", value)
+    return True
+
+############
+def setScreenBrightness(brigthness):
+    piglow.led(C_1,brigthness)
+    piglow.led(C_2,brigthness)
+    piglow.led(C_3,brigthness)
+    piglow.led(C_4,brigthness)
+    piglow.led(C_5,brigthness)
+    piglow.led(C_6,brigthness)
+    piglow.led(C_7,brigthness)
+    piglow.led(C_8,brigthness)
+    piglow.show()
+
+############
+def setChannelBrightness(channel, brigthness):
+    if channel == 'CH1':
+        piglow.led(E_1,brigthness)
+    elif channel == 'CH2':
+        piglow.led(E_2,brigthness)
+    elif channel == 'CH3':
+        piglow.led(E_3,brigthness)
+    elif channel == 'CH4':
+        piglow.led(E_4,brigthness)
+    piglow.show()
 
 print("creating new instance")
 client = mqtt.Client("P1") #create new instance
