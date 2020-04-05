@@ -72,6 +72,7 @@ def execute_request(item, value):
             return False
 
 def setADBrightness(item, value):
+    value = int(value)
     if item == 'BCKL-BRIGHT':
         setScreenBrightness(value)
     elif item == 'EXT-BRIGHT-CH1':
