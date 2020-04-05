@@ -23,7 +23,7 @@ def on_message(client, userdata, message):
 def send_confirmation(topicPath, topic, message):
     statTopic = topic.replace("cmnd", "stat")
     client.publish(statTopic,message)
-    resultMessage="{" + topicPath[2] + "}"
+    resultMessage="{\"" + topicPath[2] + "\": " + message + "}"
     client.publish("stat/" + DEVICE_NAME + "/RESULT",resultMessage)
 
 ############
