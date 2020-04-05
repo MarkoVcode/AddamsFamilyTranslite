@@ -23,20 +23,23 @@ def on_message(client, userdata, message):
 def send_confirmation(topicPath, topic, message):
     statTopic = topic.replace("cmnd", "stat")
     client.publish(statTopic,message)
-    resultMessage="{\"" + topicPath[2] + "\": " + message + "}"
+    if topicPath[2] in ITEMS_AD:
+        resultMessage="{\"" + topicPath[2] + "\": " + message + "}"
+    else:
+        resultMessage="{\"" + topicPath[2] + "\": \"" + message + "\"}"
     client.publish("stat/" + DEVICE_NAME + "/RESULT",resultMessage)
 
 ############
 def execute_request(item, value):
     if item in ITEMS_AD:
-        if (0 <= value) & (value >= 255):
-            print("the value is valid - execute")
+        if (value >= 0 ) & (value <= 255):
+            print("the value is valid AD - execute")
             return True
         else:
             return False
     elif item in ITEMS_LOGICAL:
         if value in VALID_ON_OFF_VALUES:
-            print("the value is valid - execute")
+            print("the value is valid LOGIC - execute")
             return True
         else:
             return False
