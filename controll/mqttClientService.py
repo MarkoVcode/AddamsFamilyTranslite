@@ -1,19 +1,31 @@
 import paho.mqtt.client as mqtt #import the client1
 import time
+
+DEVICE_NAME="TRANSLITE-1"
+BROKER_ADDRESS="192.168.1.7"
+
 ############
 def on_message(client, userdata, message):
-    print("message received " ,str(message.payload.decode("utf-8")))
+    # process here the request
+    recivedMessage = str(message.payload.decode("utf-8"))
+    topicPath = message.topic.split("/")
+    print("message received " ,recivedMessage)
     print("message topic=",message.topic)
     print("message qos=",message.qos)
     print("message retain flag=",message.retain)
+    send_confirmation(topicPath, message.topic, recivedMessage)
 ########################################
-broker_address="192.168.1.7"
-#broker_address="iot.eclipse.org"
+def send_confirmation(topicPath, topic, message):
+    statTopic = topic.replace("cmnd", "stat")
+    client.publish(statTopic,message)
+    resultMessage="{" + topicPath[2] + "}"
+    client.publish("stat/TRANSLITE-1/RESULT",message)
+
 print("creating new instance")
 client = mqtt.Client("P1") #create new instance
 client.on_message=on_message #attach function to callback
 print("connecting to broker")
-client.connect(broker_address) #connect to broker
+client.connect(BROKER_ADDRESS) #connect to broker
 client.loop_start() #start the loop
 print("Subscribing to topic","house/bulbs/bulb1")
 client.subscribe("house/bulbs/bulb1")
@@ -28,6 +40,8 @@ client.subscribe("cmnd/TRANSLITE-1/VOLUME")
 
 print("Publishing message to topic","house/bulbs/bulb1")
 client.publish("house/bulbs/bulb1","OFF")
+
+
 while True:
 	time.sleep(0.1) # wait
 #client.loop_stop() #stop the loop
