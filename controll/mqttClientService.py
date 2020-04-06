@@ -1,6 +1,7 @@
 import paho.mqtt.client as mqtt #import the client1
 import time
 import piglow
+from lib.sensorLight import sensorLight
 
 DEVICE_NAME="TRANSLITE-1"
 BROKER_ADDRESS="192.168.1.7"
