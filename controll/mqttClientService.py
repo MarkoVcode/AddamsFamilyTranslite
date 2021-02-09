@@ -1,13 +1,18 @@
 import paho.mqtt.client as mqtt #import the client1
 import time
 import piglow
+import json
+from datetime import datetime
 from lib.sensorLight import sensorLight
 
 DEVICE_NAME="TRANSLITE-1"
-BROKER_ADDRESS="192.168.1.7"
-ITEMS_AD=["EXT-BRIGHT-CH1", "EXT-BRIGHT-CH2", "EXT-BRIGHT-CH3", "EXT-BRIGHT-CH4", "BCKL-BRIGHT", "VOLUME"]
+BROKER_ADDRESS="192.168.1.20"
+ITEMS_AD=[]
+ITEMS_PC=["BCKL-BRIGHT", "VOLUME", "EXT-BRIGHT-CH1", "EXT-BRIGHT-CH2", "EXT-BRIGHT-CH3", "EXT-BRIGHT-CH4"]
 ITEMS_LOGICAL=["BCKL-AUTOMODE"]
 VALID_ON_OFF_VALUES=["ON", "OFF"]
+
+DELAY_ON_TELEMETRY_UPDATE = 600
 
 #Main display 
 C_1 = 13
@@ -28,6 +33,41 @@ E_4 = 3
 E_2 = 12
 #HEADER 1:
 E_1 = 11
+
+state_ch1 = None
+state_ch2 = None
+state_ch3 = None
+state_ch4 = None
+state_vol = None
+state_bright = None
+state_backl = None
+
+class SensorList:
+    def __init__(self):
+        self.Temperature1 = None
+        self.Temperature2 = None
+        self.Light1 = None
+        self.Light2 = None
+    def reprJSON(self):
+        return dict(Temperature1=self.Temperature1, Temperature2=self.Temperature2, Light1=self.Light1, Light2=self.Light2)   
+
+class Sensors:
+    def __init__(self):
+        self.Time = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+        self.Local = SensorList()
+    def reprJSON(self):
+        return dict(Time=self.Time, Local=self.Local.reprJSON())
+
+class SystemState:
+    def __init__(self):
+        self.Time = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+        self.SysUptime = ""
+    def reprJSON(self):
+        return dict(Time=self.Time, SysUptime=self.SysUptime)
+
+class DeviceState:
+	hhh = None
+
 
 ############
 def on_message(client, userdata, message):
@@ -53,7 +93,16 @@ def send_confirmation(topicPath, topic, message):
 
 ############
 def send_telemetry():
+    sensorsData = Sensors()
+#    sensorsData.Local.Temperature1 = 10
+#    sensorsData.Local.Temperature2 = 12.3
+#    sensorsData.Local.Light1 = 33222
+#    sensorsData.Local.Light2 = 321212
+    deviceState = SystemState()
     client.publish("tele/" + DEVICE_NAME + "/LWT", "Online")
+    client.publish("tele/" + DEVICE_NAME + "/SENSOR", json.dumps(sensorsData.reprJSON()))
+    client.publish("tele/" + DEVICE_NAME + "/STATE", json.dumps(deviceState.reprJSON()))
+#create JSON here with sensors and timestamps:
 
 ############
 def execute_request(item, value):
@@ -73,6 +122,13 @@ def execute_request(item, value):
         else:
             print("the value is not ON or OFF")
             return False
+    elif item in ITEMS_PC:
+	if 0 <= int(value) <= 100:
+	    print("the value is valid AD - execute")
+            return setADBrightness(item, value)
+	else:
+            print("the value is not 0 - 100 pcent")
+            return False
 
 def setADBrightness(item, value):
     value = int(value)
@@ -80,12 +136,16 @@ def setADBrightness(item, value):
         setScreenBrightness(value)
     elif item == 'EXT-BRIGHT-CH1':
         setChannelBrightness("CH1", value)
+        state_ch1 = value
     elif item == 'EXT-BRIGHT-CH2':
         setChannelBrightness("CH2", value)
+        state_ch2 = value
     elif item == 'EXT-BRIGHT-CH3':
         setChannelBrightness("CH3", value)
+        state_ch3 = value
     elif item == 'EXT-BRIGHT-CH4':
         setChannelBrightness("CH4", value)
+        state_ch4 = value
     return True
 
 ############
@@ -112,8 +172,14 @@ def setChannelBrightness(channel, brigthness):
         piglow.led(E_4,brigthness)
     piglow.show()
 
+############
+def preserveState(stateVar, stateValue):
+	
+   exit()
+
 print("creating new instance")
 client = mqtt.Client("P1") #create new instance
+client.username_pw_set(username="iot-hub", password="i0t-4ub")
 client.on_message=on_message #attach function to callback
 print("connecting to broker")
 client.connect(BROKER_ADDRESS) #connect to broker
@@ -127,8 +193,15 @@ client.subscribe("cmnd/TRANSLITE-1/BCKL-BRIGHT")
 client.subscribe("cmnd/TRANSLITE-1/BCKL-AUTOMODE")
 client.subscribe("cmnd/TRANSLITE-1/VOLUME")
 
+delayTelemetry = 0
+
 send_telemetry()
 
 while True:
 	time.sleep(0.1) # wait
+	if  delayTelemetry >= DELAY_ON_TELEMETRY_UPDATE:
+		delayTelemetry = 0
+		send_telemetry()
+	else:
+		delayTelemetry = delayTelemetry + 1
 #client.loop_stop() #stop the loop
