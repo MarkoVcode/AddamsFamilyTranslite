@@ -34,14 +34,6 @@ E_2 = 12
 #HEADER 1:
 E_1 = 11
 
-state_ch1 = None
-state_ch2 = None
-state_ch3 = None
-state_ch4 = None
-state_vol = None
-state_bright = None
-state_backl = None
-
 class SensorList:
     def __init__(self):
         self.Temperature1 = None
@@ -66,12 +58,110 @@ class SystemState:
         return dict(Time=self.Time, SysUptime=self.SysUptime)
 
 class DeviceState:
-	hhh = None
+    def __init__(self):
+        self.ch1 = 0
+        self.ch1State = "OFF"
+        self.ch2 = 0
+        self.ch2State = "OFF"
+        self.ch3 = 0
+        self.ch3State = "OFF"
+        self.ch4 = 0
+        self.ch4State = "OFF"
+	self.backl = 0
+        self.backlState = "OFF"
 
+	self.backlAuto = "OFF"
+        self.vol = 0
+    
+    def setADBrightness(self, item, value):
+        value = int(value)
+        if item == 'BCKL-BRIGHT':
+            self.backl = value
+        elif item == 'EXT-BRIGHT-CH1':
+            self.ch1 = value
+        elif item == 'EXT-BRIGHT-CH2':
+            self.ch2 = value
+        elif item == 'EXT-BRIGHT-CH3':
+            self.ch3 = value
+        elif item == 'EXT-BRIGHT-CH4':
+            self.ch4 = value
+
+        self.setDeviceStates()
+        return True
+
+    def setADOnOff(self, item, value):
+        if item == 'BCKL-BRIGHT':
+            self.backlState = value
+        elif item == 'EXT-BRIGHT-CH1':
+            self.ch1State = value
+        elif item == 'EXT-BRIGHT-CH2':
+            self.ch2State = value
+        elif item == 'EXT-BRIGHT-CH3':
+            self.ch3State = value
+        elif item == 'EXT-BRIGHT-CH4':
+            self.ch4State = value
+
+        self.setDeviceStates()
+        return True
+
+
+    def setDeviceStates(self):
+        if self.backlState == 'ON': 
+            self.setScreenBrightness(int(self.backl))
+        else:
+            self.setScreenBrightness(0)
+
+        if self.ch1State == 'ON':	
+            self.setChannelBrightness("CH1", int(self.ch1))
+        else:
+            self.setChannelBrightness("CH1", 0)
+       
+        if self.ch2State == 'ON':
+            self.setChannelBrightness("CH2", int(self.ch2))
+        else:
+            self.setChannelBrightness("CH2", 0)
+     
+        if self.ch3State == 'ON':
+            self.setChannelBrightness("CH3", int(self.ch3))
+        else:
+            self.setChannelBrightness("CH3", 0)
+
+        if self.ch4State == 'ON':
+            self.setChannelBrightness("CH4", int(self.ch4))
+        else:
+            self.setChannelBrightness("CH4", 0)
+
+	return True
+
+    def setChannelBrightness(self, channel, brigthness):
+        if channel == 'CH1':
+            piglow.led(E_1,brigthness)
+        elif channel == 'CH2':
+            piglow.led(E_2,brigthness)
+        elif channel == 'CH3':
+            piglow.led(E_3,brigthness)
+        elif channel == 'CH4':
+            piglow.led(E_4,brigthness)
+        piglow.show()
+
+
+    def setScreenBrightness(self, brigthness):
+        piglow.led(C_1,brigthness)
+        piglow.led(C_2,brigthness)
+        piglow.led(C_3,brigthness)
+        piglow.led(C_4,brigthness)
+        piglow.led(C_5,brigthness)
+        piglow.led(C_6,brigthness)
+        piglow.led(C_7,brigthness)
+        piglow.led(C_8,brigthness)
+        piglow.show()
+
+
+    def reprJSON(self):
+        return dict(CH1=self.ch1, CH2=self.ch2, CH3=self.ch3, CH4=self.ch4, VOL=self.vol, BACKL=self.backl, BACKLAUTO=self.backlAuto)
 
 ############
 def on_message(client, userdata, message):
-    # process here the request
     recivedMessage = str(message.payload.decode("utf-8"))
     topicPath = message.topic.split("/")
     print("message received " ,recivedMessage)
@@ -85,19 +175,16 @@ def on_message(client, userdata, message):
 def send_confirmation(topicPath, topic, message):
     statTopic = topic.replace("cmnd", "stat")
     client.publish(statTopic,message)
-    if topicPath[2] in ITEMS_AD:
-        resultMessage="{\"" + topicPath[2] + "\": " + message + "}"
-    else:
-        resultMessage="{\"" + topicPath[2] + "\": \"" + message + "\"}"
+    resultMessage = json.dumps(deviceStates.reprJSON())
     client.publish("stat/" + DEVICE_NAME + "/RESULT",resultMessage)
 
 ############
 def send_telemetry():
     sensorsData = Sensors()
-#    sensorsData.Local.Temperature1 = 10
-#    sensorsData.Local.Temperature2 = 12.3
-#    sensorsData.Local.Light1 = 33222
-#    sensorsData.Local.Light2 = 321212
+    sensorsData.Local.Temperature1 = 10
+    sensorsData.Local.Temperature2 = 12.3
+    sensorsData.Local.Light1 = 33222
+    sensorsData.Local.Light2 = 321212
     deviceState = SystemState()
     client.publish("tele/" + DEVICE_NAME + "/LWT", "Online")
     client.publish("tele/" + DEVICE_NAME + "/SENSOR", json.dumps(sensorsData.reprJSON()))
@@ -111,7 +198,7 @@ def execute_request(item, value):
         value = values[0]
         if 0 <= int(value) <= 255:
             print("the value is valid AD - execute")
-            return setADBrightness(item, value)
+            return deviceStates.setADBrightness(item, value)
         else:
             print("the value is not between 0 and 255")
             return False
@@ -123,59 +210,18 @@ def execute_request(item, value):
             print("the value is not ON or OFF")
             return False
     elif item in ITEMS_PC:
-	if 0 <= int(value) <= 100:
-	    print("the value is valid AD - execute")
-            return setADBrightness(item, value)
-	else:
+	if value == "ON" or value == "OFF":
+            print("the value is valid ON/OFF - execute")
+            return deviceStates.setADOnOff(item, value)
+        elif 0 <= int(value) <= 255:
+            print("the value is valid AD - execute")
+            return deviceStates.setADBrightness(item, value)
+        else:
             print("the value is not 0 - 100 pcent")
             return False
 
-def setADBrightness(item, value):
-    value = int(value)
-    if item == 'BCKL-BRIGHT':
-        setScreenBrightness(value)
-    elif item == 'EXT-BRIGHT-CH1':
-        setChannelBrightness("CH1", value)
-        state_ch1 = value
-    elif item == 'EXT-BRIGHT-CH2':
-        setChannelBrightness("CH2", value)
-        state_ch2 = value
-    elif item == 'EXT-BRIGHT-CH3':
-        setChannelBrightness("CH3", value)
-        state_ch3 = value
-    elif item == 'EXT-BRIGHT-CH4':
-        setChannelBrightness("CH4", value)
-        state_ch4 = value
-    return True
 
-############
-def setScreenBrightness(brigthness):
-    piglow.led(C_1,brigthness)
-    piglow.led(C_2,brigthness)
-    piglow.led(C_3,brigthness)
-    piglow.led(C_4,brigthness)
-    piglow.led(C_5,brigthness)
-    piglow.led(C_6,brigthness)
-    piglow.led(C_7,brigthness)
-    piglow.led(C_8,brigthness)
-    piglow.show()
-
-############
-def setChannelBrightness(channel, brigthness):
-    if channel == 'CH1':
-        piglow.led(E_1,brigthness)
-    elif channel == 'CH2':
-        piglow.led(E_2,brigthness)
-    elif channel == 'CH3':
-        piglow.led(E_3,brigthness)
-    elif channel == 'CH4':
-        piglow.led(E_4,brigthness)
-    piglow.show()
-
-############
-def preserveState(stateVar, stateValue):
-	
-   exit()
+deviceStates = DeviceState()
 
 print("creating new instance")
 client = mqtt.Client("P1") #create new instance
