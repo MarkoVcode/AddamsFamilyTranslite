@@ -231,6 +231,9 @@ print("connecting to broker")
 client.connect(BROKER_ADDRESS) #connect to broker
 client.loop_start() #start the loop
 
+#client.on_connect = on_connect
+#client.on_disconnect = on_disconnect
+
 client.subscribe("cmnd/TRANSLITE-1/EXT-BRIGHT-CH1")
 client.subscribe("cmnd/TRANSLITE-1/EXT-BRIGHT-CH2")
 client.subscribe("cmnd/TRANSLITE-1/EXT-BRIGHT-CH3")
