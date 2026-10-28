@@ -37,8 +37,10 @@ RADIO_URL = "https://stream.ltbr.fm/live"
 #seconds between reconnects when the stream drops
 RADIO_RETRY = 15
 #curl does the https (mpg321 can't), mpg321 -g sets the radio volume on the Pi itself.
+#-f: give up on HTTP errors; --speed-*: give up when the stream stalls (normal is ~16kB/s),
+#otherwise a connection that stays open without data would keep the radio silent forever.
 #Its own logger: if it held our output pipe, MQTTWrapper.sh could not restart us.
-RADIO_COMMAND = "(curl -sSN --connect-timeout 10 '%s' | mpg321 -q -o alsa -g %d -) 2>&1 | logger -t translite-radio"
+RADIO_COMMAND = "(curl -fsSN --connect-timeout 10 --speed-limit 1000 --speed-time 15 '%s' | mpg321 -q -o alsa -g %d -) 2>&1 | logger -t translite-radio"
 
 #NOOBS SETTINGS partition (/dev/mmcblk0p3), mounted read-only
 SETTINGS_MOUNT = "/mnt/settings"
