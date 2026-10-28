@@ -9,7 +9,10 @@
 #      + Add resource: URL /local/translite-mixer-card.js,
 #      type "JavaScript module" > Create. (No Resources menu? Turn on
 #      Advanced mode in your user profile.)
-#   3. Settings > Dashboards > + Add dashboard > New dashboard from scratch,
+#   3. Either add it as a view (tab) of an existing dashboard: use
+#      translite-view.yaml instead of this file (instructions inside), or
+#      make it its own dashboard with this file:
+#      Settings > Dashboards > + Add dashboard > New dashboard from scratch,
 #      name "Translite", icon mdi:ghost > Create. Open it, pencil (edit) >
 #      three dots > Raw configuration editor > replace everything with this
 #      file > Save.

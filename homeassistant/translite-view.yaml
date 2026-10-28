@@ -1,0 +1,154 @@
+# The Translite view on its own - for adding it as a VIEW (tab) to an existing
+# dashboard, e.g. Overview. Same layout as translite-dashboard.yaml, which is
+# the whole-dashboard version (generated from it - edit that one, then regenerate).
+#
+# Install (do steps 1 and 2 from translite-dashboard.yaml first, for the mixer card):
+#   Open the dashboard > pencil (edit) > + (add view) or the pencil next to an
+#   existing view's name > three dots > "Edit in YAML" > replace EVERYTHING in
+#   the editor with this file > Save.
+title: Translite
+path: translite
+icon: mdi:ghost
+type: sections
+max_columns: 4
+sections:
+
+  # ---------- header + what is playing ----------
+  - type: grid
+    cards:
+      - type: heading
+        heading: The Addams Family
+        heading_style: title
+        icon: mdi:ghost
+      - type: markdown
+        content: >-
+          {% set online = states('switch.translite_backlight') not in ['unavailable', 'unknown'] %}
+          {% if online %}🟢 **Translite online**{% else %}🔴 **Translite offline**{% endif %}
+          &nbsp;·&nbsp; backlight **{{ states('sensor.translite_backlight_brightness') }}** / 154
+          &nbsp;·&nbsp; master **{{ states('number.translite_master_volume') | int(0) }}** / 63
+
+          {% if is_state('switch.translite_addams_music', 'on') %}🎹 *They're creepy and they're kooky…* the Addams music is playing
+          {%- elif is_state('switch.translite_radio', 'on') %}📻 London Tower Block Radio is playing quietly
+          {%- else %}🤫 All quiet in the mansion{% endif %}
+      - type: tile
+        entity: switch.translite_addams_music
+        name: Addams music
+        icon: mdi:hand-clap
+        color: deep-purple
+        vertical: true
+        tap_action:
+          action: toggle
+        grid_options:
+          columns: 6
+          rows: 2
+      - type: tile
+        entity: switch.translite_radio
+        name: Radio
+        icon: mdi:radio
+        color: teal
+        vertical: true
+        tap_action:
+          action: toggle
+        grid_options:
+          columns: 6
+          rows: 2
+
+  # ---------- mixer ----------
+  - type: grid
+    cards:
+      - type: heading
+        heading: Mixer
+        icon: mdi:tune-vertical
+      # vertical faders: Addams music and radio on the Pi, master = amplifier
+      - type: custom:translite-mixer-card
+        title: ""
+        grid_options:
+          columns: 12
+          rows: 6
+
+  # ---------- lights ----------
+  - type: grid
+    cards:
+      - type: heading
+        heading: Lights
+        icon: mdi:television-ambient-light
+      - type: tile
+        entity: switch.translite_backlight
+        name: Backlight
+        icon: mdi:television-ambient-light
+        color: amber
+        tap_action:
+          action: toggle
+        grid_options:
+          columns: 6
+      - type: tile
+        entity: switch.translite_blink_effects
+        name: Spooky blinks
+        icon: mdi:flash
+        color: orange
+        tap_action:
+          action: toggle
+        grid_options:
+          columns: 6
+      - type: tile
+        entity: number.translite_backlight_level
+        name: Backlight level
+        icon: mdi:brightness-6
+        color: amber
+        features:
+          - type: numeric-input
+            style: slider
+        grid_options:
+          columns: 12
+      - type: tile
+        entity: light.translite_external_ch1
+        name: External CH1
+        features:
+          - type: light-brightness
+        grid_options:
+          columns: 12
+
+  # ---------- schedule + sensors ----------
+  - type: grid
+    cards:
+      - type: heading
+        heading: Daily show & sensors
+        icon: mdi:clock-time-twelve-outline
+      - type: tile
+        entity: switch.translite_daily_music
+        name: Music every day at 12:00
+        icon: mdi:calendar-clock
+        color: deep-purple
+        tap_action:
+          action: toggle
+        grid_options:
+          columns: 12
+      - type: gauge
+        entity: sensor.translite_backlight_brightness
+        name: Backlight now
+        min: 0
+        max: 154
+        # 154 is the hard cap on the Pi, so a full gauge is normal in a bright room
+        segments:
+          - from: 0
+            color: "#ffb300"
+        grid_options:
+          columns: 6
+          rows: 3
+      - type: entity
+        entity: sensor.translite_light_sensor
+        name: Light sensor (high = dark)
+        icon: mdi:brightness-percent
+        grid_options:
+          columns: 6
+          rows: 3
+      - type: history-graph
+        title: Last 24 hours
+        hours_to_show: 24
+        entities:
+          - entity: sensor.translite_backlight_brightness
+            name: Backlight
+          - entity: sensor.translite_light_sensor
+            name: Light sensor
+        grid_options:
+          columns: 12
