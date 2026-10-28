@@ -1,0 +1,7 @@
+# MQTT broker settings for mqttClientService.py.
+# Copy to mqtt.properties (same folder) and fill in. mqtt.properties is in
+# .gitignore - never commit it. On the Pi: run "rw" first, "ro" afterwards,
+# then restart the service.
+mqtt.broker=192.168.1.20
+mqtt.username=CHANGE_ME
+mqtt.password=CHANGE_ME

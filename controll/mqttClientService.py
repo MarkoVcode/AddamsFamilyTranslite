@@ -14,7 +14,8 @@ from lib.backlightEffects import backlightEffects
 from lib.settingsStore import settingsStore
 
 DEVICE_NAME="TRANSLITE-1"
-BROKER_ADDRESS="192.168.1.20"
+#broker address and login, kept out of git (see config/mqtt.properties.example)
+MQTT_CONFIG = "config/mqtt.properties"
 VALID_ON_OFF_VALUES=["ON", "OFF"]
 
 #seconds
@@ -372,6 +373,22 @@ def safe_on_message(client, userdata, message):
     except Exception as e:
         print("error handling message on " + message.topic + ": " + repr(e))
 
+############
+# Exits with a clear message instead of failing later in paho. The pause stops
+# MQTTWrapper.sh from restarting us (and filling the log) every few seconds.
+def load_mqtt_config():
+    try:
+        mqttConfig = load_properties(MQTT_CONFIG)
+        for key in ["mqtt.broker", "mqtt.username", "mqtt.password"]:
+            if not mqttConfig.get(key):
+                raise ValueError(key + " is missing")
+        return mqttConfig
+    except Exception as e:
+        print("cannot read " + MQTT_CONFIG + ": " + repr(e) + " - copy config/mqtt.properties.example and fill it in")
+        time.sleep(60)
+        sys.exit(1)
+
+mqttConfig = load_mqtt_config()
 audio = load_properties("config/audio.properties")
 DEFAULT_SETTINGS["VOLUME"] = min(int(audio["af.soundplay.volume." + AUDIO_TRACK]), MAX_VOLUME)
 
@@ -424,7 +441,7 @@ lastConnected = time.time()
 print("creating new instance")
 # client id must be unique on the broker, otherwise two clients kick each other off
 client = mqtt.Client(DEVICE_NAME)
-client.username_pw_set(username="iot-hub", password="***REMOVED***")
+client.username_pw_set(username=mqttConfig["mqtt.username"], password=mqttConfig["mqtt.password"])
 client.will_set(LWT_TOPIC, "Offline", retain=True)
 client.reconnect_delay_set(min_delay=1, max_delay=30)
 client.on_connect = on_connect
@@ -432,7 +449,7 @@ client.on_disconnect = on_disconnect
 client.on_message = safe_on_message
 print("connecting to broker")
 # connect_async does not fail when network/broker is not up yet at boot
-client.connect_async(BROKER_ADDRESS, keepalive=30)
+client.connect_async(mqttConfig["mqtt.broker"], keepalive=30)
 client.loop_start()
 
 lastTelemetry = time.time()
