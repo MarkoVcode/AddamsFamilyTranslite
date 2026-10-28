@@ -4,6 +4,9 @@ import sys
 import piglow
 import json
 import subprocess
+import os
+import signal
+import atexit
 from datetime import datetime
 from Adafruit_MAX9744 import MAX9744
 from lib.sensorLight import sensorLight
@@ -28,9 +31,22 @@ AUDIO_TRACK = "1"
 #MAX9744 amplifier range
 MAX_VOLUME = 63
 
+#background radio, stops while the addams music plays
+RADIO_URL = "https://stream.ltbr.fm/live"
+#seconds between reconnects when the stream drops
+RADIO_RETRY = 15
+#curl does the https (mpg321 can't), mpg321 -g sets the radio volume on the Pi itself.
+#Its own logger: if it held our output pipe, MQTTWrapper.sh could not restart us.
+RADIO_COMMAND = "(curl -sSN --connect-timeout 10 '%s' | mpg321 -q -o alsa -g %d -) 2>&1 | logger -t translite-radio"
+
 #NOOBS SETTINGS partition (/dev/mmcblk0p3), mounted read-only
 SETTINGS_MOUNT = "/mnt/settings"
 SETTINGS_FILE = "translite/settings.json"
+
+#Hard limits for the LEDs. Above this the power supply makes noise (and it
+#saves energy). Nothing can set the LEDs higher.
+MAX_BACKLIGHT = 154
+MAX_EXT_BRIGHTNESS = 154
 
 #Main display
 C_1 = 13
@@ -55,13 +71,15 @@ E_1 = 11
 EXT_LEDS = {"CH1": E_1, "CH2": E_2, "CH3": E_3, "CH4": E_4}
 
 # Every setting has cmnd/TRANSLITE-1/<NAME> and a retained stat/TRANSLITE-1/<NAME>
-SWITCHES = ["BACKLIGHT", "SOUND", "EFFECTS",
+SWITCHES = ["BACKLIGHT", "SOUND", "EFFECTS", "RADIO",
             "EXT-POWER-CH1", "EXT-POWER-CH2", "EXT-POWER-CH3", "EXT-POWER-CH4"]
 #name: (min, max)
-NUMBERS = {"BCKL-LEVEL": (10, 200),
+#BCKL-LEVEL can only dim the curve, never raise it
+NUMBERS = {"BCKL-LEVEL": (10, 100),
            "VOLUME": (0, MAX_VOLUME),
-           "EXT-BRIGHT-CH1": (0, 255), "EXT-BRIGHT-CH2": (0, 255),
-           "EXT-BRIGHT-CH3": (0, 255), "EXT-BRIGHT-CH4": (0, 255)}
+           "RADIO-VOLUME": (0, 100),
+           "EXT-BRIGHT-CH1": (0, MAX_EXT_BRIGHTNESS), "EXT-BRIGHT-CH2": (0, MAX_EXT_BRIGHTNESS),
+           "EXT-BRIGHT-CH3": (0, MAX_EXT_BRIGHTNESS), "EXT-BRIGHT-CH4": (0, MAX_EXT_BRIGHTNESS)}
 
 DEFAULT_SETTINGS = {
     "BACKLIGHT": "ON",
@@ -72,6 +90,9 @@ DEFAULT_SETTINGS = {
     "SOUND": "ON",
     #random backlight blinks
     "EFFECTS": "ON",
+    "RADIO": "OFF",
+    #percent, relative to the addams music (the amplifier VOLUME is shared)
+    "RADIO-VOLUME": 30,
     "EXT-POWER-CH1": "OFF", "EXT-BRIGHT-CH1": 0,
     "EXT-POWER-CH2": "OFF", "EXT-BRIGHT-CH2": 0,
     "EXT-POWER-CH3": "OFF", "EXT-BRIGHT-CH3": 0,
@@ -103,41 +124,36 @@ class SystemState:
         return dict(Time=self.Time, SysUptime=self.SysUptime)
 
 ############
-# Same curve as the old BacklightControllerBrightness.py: high reading = dark room = dim
+# (sensor reading, brightness): the old BacklightControllerBrightness.py steps at
+# 70%, joined by straight lines so the backlight fades instead of jumping.
+# Tops out at MAX_BACKLIGHT. High reading = dark room = dim.
+BACKLIGHT_CURVE = [(10, 0), (20, 154), (180, 140), (300, 126), (350, 91),
+                   (400, 77), (450, 56), (500, 35), (850, 7)]
+
 def convertToBrightness(data):
-    if data >=  850:
-        return 10
-    elif data >= 500:
-        return 50
-    elif data >= 450:
-        return 80
-    elif data >= 400:
-        return 110
-    elif data >= 350:
-        return 130
-    elif data >= 300:
-        return 180
-    elif data >= 180:
-        return 200
-    elif data >= 20:
-        return 220
-    else:
-        return 0
+    if data <= BACKLIGHT_CURVE[0][0]:
+        return BACKLIGHT_CURVE[0][1]
+    for (x1, y1), (x2, y2) in zip(BACKLIGHT_CURVE, BACKLIGHT_CURVE[1:]):
+        if data <= x2:
+            return int(round(y1 + (y2 - y1) * (data - x1) / float(x2 - x1)))
+    return BACKLIGHT_CURVE[-1][1]
 
 ############
 # Only called from the main loop, so the LEDs are driven from one thread.
 # Returns the brightness the main display was set to.
 def applyLights(sensorBrightness):
     if settings["BACKLIGHT"] == "ON":
-        #BCKL-LEVEL moves the whole curve up or down
-        screen = min(255, sensorBrightness * settings["BCKL-LEVEL"] // 100)
+        #BCKL-LEVEL dims the whole curve; the cap also covers a bad value from the settings file
+        level = min(100, settings["BCKL-LEVEL"])
+        screen = min(MAX_BACKLIGHT, sensorBrightness * level // 100)
     else:
         screen = 0
     for led in SCREEN_LEDS:
         piglow.led(led, screen)
     for channel, led in EXT_LEDS.items():
         if settings["EXT-POWER-" + channel] == "ON":
-            piglow.led(led, settings["EXT-BRIGHT-" + channel])
+            #capped here too, in case the settings file has a higher value
+            piglow.led(led, min(MAX_EXT_BRIGHTNESS, settings["EXT-BRIGHT-" + channel]))
         else:
             piglow.led(led, 0)
     piglow.show()
@@ -154,12 +170,52 @@ def load_properties(path):
     return props
 
 ############
+def is_running(process):
+    return process is not None and process.poll() is None
+
+############
+def start_radio():
+    global radioProcess, radioGain, lastRadioStart
+    radioGain = settings["RADIO-VOLUME"]
+    lastRadioStart = time.time()
+    #Pi output at full level, same as SoundPlay.py (the saved ALSA state is -17dB)
+    subprocess.call(["amixer", "-q", "cset", "numid=1", "0"])
+    print("starting radio at radio volume " + str(radioGain))
+    #own process group, so stop_radio() can stop curl and mpg321 together
+    devnull = open(os.devnull, "w")
+    radioProcess = subprocess.Popen(RADIO_COMMAND % (RADIO_URL, radioGain),
+                                    shell=True, preexec_fn=os.setsid,
+                                    stdout=devnull, stderr=devnull)
+
+############
+# Waits until the radio has let go of the audio device.
+def stop_radio():
+    global radioProcess
+    if not is_running(radioProcess):
+        radioProcess = None
+        return
+    print("stopping radio")
+    os.killpg(radioProcess.pid, signal.SIGTERM)
+    for i in range(20):
+        if radioProcess.poll() is not None:
+            break
+        time.sleep(0.1)
+    else:
+        os.killpg(radioProcess.pid, signal.SIGKILL)
+        radioProcess.wait()
+    radioProcess = None
+
+############
 # Plays the track in the background with SoundPlay.py, which also fires the knocker.
+# Main loop only: the radio is stopped first, the audio output can't play both.
 def play_sound():
-    global soundProcess
-    if soundProcess is not None and soundProcess.poll() is None:
+    global soundProcess, ampLevel
+    if is_running(soundProcess):
         print("sound already playing")
         return False
+    stop_radio()
+    #SoundPlay.py drives the amplifier until it exits
+    ampLevel = None
     #re-read every time, so knock markers can be tuned without a restart
     audio = load_properties("config/audio.properties")
     track = "af.soundplay.%s." + AUDIO_TRACK
@@ -170,11 +226,14 @@ def play_sound():
         "-s", audio[track % "start"],
         "-t", audio[track % "stop"],
         "-k", audio[track % "knock"]])
+    publish_music()
     return True
 
 ############
 def stop_sound():
-    if soundProcess is not None and soundProcess.poll() is None:
+    global musicRequested
+    musicRequested = False
+    if is_running(soundProcess):
         print("stopping sound")
         #SoundPlay.py mutes the amp and releases the knocker on SIGTERM
         soundProcess.terminate()
@@ -195,13 +254,18 @@ def on_message(client, userdata, message):
 
 ############
 def execute_request(item, value, retained):
-    global lastChange
-    if item == "PLAY":
+    global lastChange, musicRequested
+    if item == "PLAY" or (item == "MUSIC" and value == "ON"):
         #a retained PLAY would start the music on every reconnect
         if retained:
-            print("ignoring retained PLAY")
+            print("ignoring retained " + item)
             return False
-        return play_sound()
+        #started by the main loop, which owns the radio and the amplifier
+        musicRequested = True
+        return False
+    elif item == "MUSIC" and value == "OFF":
+        stop_sound()
+        return False
     elif item in SWITCHES:
         if value not in VALID_ON_OFF_VALUES:
             print("the value is not ON or OFF")
@@ -229,6 +293,12 @@ def publish_state():
     for key, value in settings.items():
         client.publish("stat/" + DEVICE_NAME + "/" + key, str(value), retain=True)
     client.publish("stat/" + DEVICE_NAME + "/RESULT", json.dumps(settings), retain=True)
+    publish_music()
+
+############
+# ON while the addams music plays - state of the MUSIC switch in home assistant
+def publish_music():
+    client.publish("stat/" + DEVICE_NAME + "/MUSIC", "ON" if is_running(soundProcess) else "OFF", retain=True)
 
 ############
 def send_telemetry():
@@ -297,8 +367,31 @@ restoreStarted = None
 
 amp = MAX9744()
 amp.set_volume(0)
+#what we last set the amplifier to, None while SoundPlay.py drives it
+ampLevel = 0
 soundProcess = None
+musicRequested = False
 lastPlayDay = None
+radioProcess = None
+radioGain = None
+lastRadioStart = 0
+
+#a radio left over from a killed instance would hold the audio device
+subprocess.call(["pkill", "-f", RADIO_URL])
+
+############
+# Runs on every exit (also errors and the offline exit): no radio or amp left behind.
+def shutdown():
+    stop_radio()
+    amp.set_volume(0)
+    print("stopped")
+
+def on_sigterm(signum, frame):
+    #turns SIGTERM into a normal exit, so shutdown() runs
+    sys.exit(0)
+
+atexit.register(shutdown)
+signal.signal(signal.SIGTERM, on_sigterm)
 
 lightSensor = sensorLight()
 lightSensor.fetchValues()
@@ -331,8 +424,8 @@ while True:
     now = time.time()
 
     lightSensor.fetchValues()
-    #smooth the reading so the backlight does not jump between levels
-    lightLevel = lightLevel * 0.9 + lightSensor.ext_level * 0.1
+    #smooth the reading so the backlight fades over ~2s instead of jumping
+    lightLevel = lightLevel * 0.95 + lightSensor.ext_level * 0.05
     screen = applyLights(convertToBrightness(lightLevel))
     if screen > 0 and settings["EFFECTS"] == "ON":
         if effects.doRandomBlink():
@@ -344,15 +437,41 @@ while True:
     if (today.hour, today.minute) == PLAY_AT and lastPlayDay != today.date():
         lastPlayDay = today.date()
         if settings["SOUND"] == "ON":
-            play_sound()
+            musicRequested = True
         else:
             print("daily sound is switched off")
 
-    #whatever happened in SoundPlay.py, never leave the amp on afterwards
-    if soundProcess is not None and soundProcess.poll() is not None:
-        print("sound finished (exit code " + str(soundProcess.returncode) + "), amplifier muted")
+    if musicRequested:
+        musicRequested = False
+        play_sound()
+
+    if soundProcess is not None and not is_running(soundProcess):
+        print("sound finished (exit code " + str(soundProcess.returncode) + ")")
         soundProcess = None
-        amp.set_volume(0)
+        #SoundPlay.py always mutes the amplifier when it ends
+        ampLevel = 0
+        publish_music()
+
+    #the radio plays whenever it is on and the addams music is not playing
+    if not is_running(soundProcess):
+        if settings["RADIO"] == "ON":
+            if radioProcess is not None and not is_running(radioProcess):
+                print("radio stopped (exit code " + str(radioProcess.returncode) + "), retrying in " + str(RADIO_RETRY) + "s")
+                radioProcess = None
+            if is_running(radioProcess) and radioGain != settings["RADIO-VOLUME"] and now - lastChange >= 2:
+                #radio volume changed: restart with the new gain once the slider has settled
+                stop_radio()
+                lastRadioStart = 0
+            if radioProcess is None and now - lastRadioStart >= RADIO_RETRY:
+                start_radio()
+        elif radioProcess is not None:
+            stop_radio()
+
+        #amplifier on only while the radio plays; never left on after the music
+        wantAmp = settings["VOLUME"] if is_running(radioProcess) else 0
+        if ampLevel != wantAmp:
+            amp.set_volume(wantAmp)
+            ampLevel = wantAmp
 
     if restoring and connected:
         if restoreStarted is None:

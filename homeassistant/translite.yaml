@@ -1,9 +1,9 @@
 # Home Assistant MQTT config for the Addams Family translite (TRANSLITE-1).
 # Paste into configuration.yaml (merge with an existing "mqtt:" section).
 #
-# Commands use retain: true, so the broker remembers them and the Pi gets them
+# Settings use retain: true, so the broker remembers them and the Pi gets them
 # back after a restart. The Pi also saves them on its SETTINGS partition, in case
-# the broker loses its retained messages. PLAY is a button and must NOT be retained.
+# the broker loses its retained messages. The MUSIC switch must NOT be retained.
 
 mqtt:
   switch:
@@ -27,6 +27,29 @@ mqtt:
       payload_not_available: "Offline"
       icon: mdi:music
 
+    # Addams music with the finger-snap knocker, on demand. ON while it plays,
+    # turns itself OFF when the music ends. Not retained: it is an action.
+    - name: "Translite Addams music"
+      unique_id: translite_music
+      command_topic: "cmnd/TRANSLITE-1/MUSIC"
+      state_topic: "stat/TRANSLITE-1/MUSIC"
+      retain: false
+      availability_topic: "tele/TRANSLITE-1/LWT"
+      payload_available: "Online"
+      payload_not_available: "Offline"
+      icon: mdi:hand-clap
+
+    # Background radio (stream.ltbr.fm), goes quiet while the Addams music plays
+    - name: "Translite radio"
+      unique_id: translite_radio
+      command_topic: "cmnd/TRANSLITE-1/RADIO"
+      state_topic: "stat/TRANSLITE-1/RADIO"
+      retain: true
+      availability_topic: "tele/TRANSLITE-1/LWT"
+      payload_available: "Online"
+      payload_not_available: "Offline"
+      icon: mdi:radio
+
     - name: "Translite blink effects"
       unique_id: translite_effects
       command_topic: "cmnd/TRANSLITE-1/EFFECTS"
@@ -38,13 +61,13 @@ mqtt:
       icon: mdi:flash
 
   number:
-    # 100 = normal light-sensor curve, 50 = everything half as bright
+    # 100 = full light-sensor curve (capped on the Pi), 50 = everything half as bright
     - name: "Translite backlight level"
       unique_id: translite_backlight_level
       command_topic: "cmnd/TRANSLITE-1/BCKL-LEVEL"
       state_topic: "stat/TRANSLITE-1/BCKL-LEVEL"
       min: 10
-      max: 200
+      max: 100
       step: 5
       unit_of_measurement: "%"
       retain: true
@@ -53,7 +76,23 @@ mqtt:
       payload_not_available: "Offline"
       icon: mdi:brightness-6
 
-    # MAX9744 amplifier volume, 0-63
+    # Radio volume on the Pi, relative to the Addams music (the amplifier
+    # volume below is shared). 100 = as loud as the music, 30 = background.
+    - name: "Translite radio volume"
+      unique_id: translite_radio_volume
+      command_topic: "cmnd/TRANSLITE-1/RADIO-VOLUME"
+      state_topic: "stat/TRANSLITE-1/RADIO-VOLUME"
+      min: 0
+      max: 100
+      step: 5
+      unit_of_measurement: "%"
+      retain: true
+      availability_topic: "tele/TRANSLITE-1/LWT"
+      payload_available: "Online"
+      payload_not_available: "Offline"
+      icon: mdi:radio
+
+    # MAX9744 amplifier volume, 0-63, shared by music and radio
     - name: "Translite volume"
       unique_id: translite_volume
       command_topic: "cmnd/TRANSLITE-1/VOLUME"
@@ -66,17 +105,6 @@ mqtt:
       payload_available: "Online"
       payload_not_available: "Offline"
       icon: mdi:volume-high
-
-  button:
-    - name: "Translite play music"
-      unique_id: translite_play
-      command_topic: "cmnd/TRANSLITE-1/PLAY"
-      payload_press: "ON"
-      retain: false
-      availability_topic: "tele/TRANSLITE-1/LWT"
-      payload_available: "Online"
-      payload_not_available: "Offline"
-      icon: mdi:play
 
   sensor:
     - name: "Translite light sensor"
@@ -99,7 +127,8 @@ mqtt:
       state_topic: "stat/TRANSLITE-1/EXT-POWER-CH1"
       brightness_command_topic: "cmnd/TRANSLITE-1/EXT-BRIGHT-CH1"
       brightness_state_topic: "stat/TRANSLITE-1/EXT-BRIGHT-CH1"
-      brightness_scale: 255
+      # the Pi caps these at 154, so 100% in Home Assistant = 154
+      brightness_scale: 154
       retain: true
       availability_topic: "tele/TRANSLITE-1/LWT"
       payload_available: "Online"
