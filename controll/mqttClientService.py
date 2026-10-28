@@ -78,6 +78,7 @@ SWITCHES = ["BACKLIGHT", "SOUND", "EFFECTS", "RADIO",
 NUMBERS = {"BCKL-LEVEL": (10, 100),
            "VOLUME": (0, MAX_VOLUME),
            "RADIO-VOLUME": (0, 100),
+           "MUSIC-VOLUME": (0, 100),
            "EXT-BRIGHT-CH1": (0, MAX_EXT_BRIGHTNESS), "EXT-BRIGHT-CH2": (0, MAX_EXT_BRIGHTNESS),
            "EXT-BRIGHT-CH3": (0, MAX_EXT_BRIGHTNESS), "EXT-BRIGHT-CH4": (0, MAX_EXT_BRIGHTNESS)}
 
@@ -85,7 +86,10 @@ DEFAULT_SETTINGS = {
     "BACKLIGHT": "ON",
     #percent of the light sensor curve
     "BCKL-LEVEL": 100,
+    #master volume: the amplifier, shared by the music and the radio
     "VOLUME": 60,
+    #addams music volume on the Pi, percent
+    "MUSIC-VOLUME": 100,
     #daily music at PLAY_AT
     "SOUND": "ON",
     #random backlight blinks
@@ -220,14 +224,26 @@ def play_sound():
     audio = load_properties("config/audio.properties")
     track = "af.soundplay.%s." + AUDIO_TRACK
     print("playing " + audio[track % "track"] + " at volume " + str(settings["VOLUME"]))
+    #stdin stays open so volume changes reach the music while it plays
     soundProcess = subprocess.Popen(["/usr/bin/python", "SoundPlay.py",
         "-v", str(settings["VOLUME"]),
+        "-m", str(settings["MUSIC-VOLUME"]),
         "-i", audio["af.soundtrack.path"] + "/" + audio[track % "track"],
         "-s", audio[track % "start"],
         "-t", audio[track % "stop"],
-        "-k", audio[track % "knock"]])
+        "-k", audio[track % "knock"]], stdin=subprocess.PIPE)
     publish_music()
     return True
+
+############
+# live volume change for the music that is playing right now (see SoundPlay.py)
+def send_to_music(item, value):
+    if is_running(soundProcess):
+        try:
+            soundProcess.stdin.write(item + " " + str(value) + "\n")
+            soundProcess.stdin.flush()
+        except IOError as e:
+            print("could not send " + item + " to the music: " + repr(e))
 
 ############
 def stop_sound():
@@ -275,6 +291,8 @@ def execute_request(item, value, retained):
         low, high = NUMBERS[item]
         #home assistant may send "60.0"
         settings[item] = max(low, min(high, int(float(value))))
+        if item in ("VOLUME", "MUSIC-VOLUME"):
+            send_to_music(item, settings[item])
     elif item.startswith("EXT-BRIGHT-CH") and value in VALID_ON_OFF_VALUES:
         #old style: ON/OFF sent to the brightness topic
         settings["EXT-POWER-" + item[-3:]] = value

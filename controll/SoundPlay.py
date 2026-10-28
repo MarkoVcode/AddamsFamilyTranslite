@@ -3,6 +3,7 @@
 import sys, getopt
 import os
 import signal
+import select
 import subprocess
 import pygame
 import time
@@ -29,7 +30,27 @@ FADE_OUT_MS = 3000
 #amplifier keeps the Pi's own noise down (it was -17.25dB with the amp near max)
 PI_OUTPUT_LEVEL = 0
 
-MESSAGE = 'test.py -v <volume> -i <wavfile> -s <startmarker> -t <stopmarker> -k <knockeventsmarker>'
+MESSAGE = 'test.py -v <volume> -m <musicvolume> -i <wavfile> -s <startmarker> -t <stopmarker> -k <knockeventsmarker>'
+
+controlBuffer = ['']
+controlOpen = [True]
+
+# Live changes from mqttClientService.py on stdin, one per line:
+# "VOLUME <0-63>" (amplifier) or "MUSIC-VOLUME <0-100>" (this player on the Pi)
+def readControl():
+   commands = []
+   while controlOpen[0] and select.select([sys.stdin], [], [], 0)[0]:
+      data = os.read(sys.stdin.fileno(), 1024)
+      if data == '':
+         controlOpen[0] = False
+         break
+      controlBuffer[0] += data
+   while '\n' in controlBuffer[0]:
+      line, controlBuffer[0] = controlBuffer[0].split('\n', 1)
+      parts = line.split()
+      if len(parts) == 2 and parts[1].isdigit():
+         commands.append((parts[0], int(parts[1])))
+   return commands
 
 def main(argv):
    inputfile = ''
@@ -37,8 +58,9 @@ def main(argv):
    stop = ''
    knockMarkers = ''
    volume = ''
+   musicVolume = '100'
    try:
-      opts, args = getopt.getopt(argv,"hv:i:s:t:k:",["volume=","ifile=","start=","stop=","knock="])
+      opts, args = getopt.getopt(argv,"hv:m:i:s:t:k:",["volume=","musicvolume=","ifile=","start=","stop=","knock="])
    except getopt.GetoptError:
       print MESSAGE
       sys.exit(2)
@@ -48,6 +70,8 @@ def main(argv):
          sys.exit()
       elif opt in ("-v", "--volume"):
          volume = arg
+      elif opt in ("-m", "--musicvolume"):
+         musicVolume = arg
       elif opt in ("-i", "--ifile"):
          inputfile = arg
       elif opt in ("-s", "--start"):
@@ -72,11 +96,21 @@ def main(argv):
    pygame.mixer.init()
    pygame.mixer.music.load(inputfile)
    pygame.mixer.music.play()
+   # music volume on the Pi, 0-100%; the amplifier (VOLUME) is the master
+   pygame.mixer.music.set_volume(int(musicVolume) / 100.0)
    vset = True
    pendingKnocks = sorted(int(k) for k in knockMarkers.split("|") if k != '')
    while pygame.mixer.music.get_busy() == True:
        position = pygame.mixer.music.get_pos()
 #       print position
+       for name, value in readControl():
+           if name == "VOLUME":
+               volume = value
+               # before the start marker the amp stays muted; it gets the new value there
+               if not vset:
+                   amp.set_volume(int(volume))
+           elif name == "MUSIC-VOLUME":
+               pygame.mixer.music.set_volume(value / 100.0)
        # the loop never lands exactly on a millisecond, so knock as soon as a marker is passed
        while pendingKnocks and position >= pendingKnocks[0]:
            pendingKnocks.pop(0)

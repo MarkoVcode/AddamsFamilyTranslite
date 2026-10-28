@@ -76,8 +76,7 @@ mqtt:
       payload_not_available: "Offline"
       icon: mdi:brightness-6
 
-    # Radio volume on the Pi, relative to the Addams music (the amplifier
-    # volume below is shared). 100 = as loud as the music, 30 = background.
+    # Radio volume on the Pi, 0-100%. 100 = same level as music volume 100.
     - name: "Translite radio volume"
       unique_id: translite_radio_volume
       command_topic: "cmnd/TRANSLITE-1/RADIO-VOLUME"
@@ -92,8 +91,24 @@ mqtt:
       payload_not_available: "Offline"
       icon: mdi:radio
 
-    # MAX9744 amplifier volume, 0-63, shared by music and radio
-    - name: "Translite volume"
+    # Mixer: master = the amplifier, plus one fader on the Pi per source.
+    # Addams music volume on the Pi, 0-100%. Works live while it plays.
+    - name: "Translite music volume"
+      unique_id: translite_music_volume
+      command_topic: "cmnd/TRANSLITE-1/MUSIC-VOLUME"
+      state_topic: "stat/TRANSLITE-1/MUSIC-VOLUME"
+      min: 0
+      max: 100
+      step: 5
+      unit_of_measurement: "%"
+      retain: true
+      availability_topic: "tele/TRANSLITE-1/LWT"
+      payload_available: "Online"
+      payload_not_available: "Offline"
+      icon: mdi:hand-clap
+
+    # Master volume: the MAX9744 amplifier, 0-63, shared by music and radio
+    - name: "Translite master volume"
       unique_id: translite_volume
       command_topic: "cmnd/TRANSLITE-1/VOLUME"
       state_topic: "stat/TRANSLITE-1/VOLUME"
