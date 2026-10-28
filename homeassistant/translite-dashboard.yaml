@@ -1,12 +1,21 @@
 # Home Assistant dashboard for the Addams Family translite (TRANSLITE-1).
-# Built-in cards only (no HACS). Needs Home Assistant 2024.10 or newer
-# (sections view, heading and tile cards with slider features).
+# Built-in cards plus our own mixer card (www/translite-mixer-card.js, no HACS).
+# Needs Home Assistant 2024.10 or newer (sections view, heading and tile cards).
 #
 # Install:
-#   Settings > Dashboards > + Add dashboard > New dashboard from scratch,
-#   name "Translite", icon mdi:ghost > Create. Open it, pencil (edit) >
-#   three dots > Raw configuration editor > replace everything with this
-#   file > Save.
+#   1. Copy www/translite-mixer-card.js to /config/www/ on Home Assistant
+#      (File editor or Studio Code Server add-on, or Samba).
+#   2. Settings > Dashboards > three dots (top right) > Resources >
+#      + Add resource: URL /local/translite-mixer-card.js,
+#      type "JavaScript module" > Create. (No Resources menu? Turn on
+#      Advanced mode in your user profile.)
+#   3. Settings > Dashboards > + Add dashboard > New dashboard from scratch,
+#      name "Translite", icon mdi:ghost > Create. Open it, pencil (edit) >
+#      three dots > Raw configuration editor > replace everything with this
+#      file > Save.
+#   4. Refresh the browser (Ctrl+F5) so it loads the mixer card.
+#   After updating the .js file later, refresh again; if the old card stays,
+#   change the resource URL to /local/translite-mixer-card.js?v=2.
 #
 # Entity ids are the ones Home Assistant makes from the names in
 # translite.yaml (e.g. "Translite radio" -> switch.translite_radio). If
@@ -67,36 +76,12 @@ views:
           - type: heading
             heading: Mixer
             icon: mdi:tune-vertical
-          - type: tile
-            entity: number.translite_master_volume
-            name: Master (amplifier)
-            icon: mdi:volume-high
-            color: red
-            features:
-              - type: numeric-input
-                style: slider
+          # vertical faders: Addams music and radio on the Pi, master = amplifier
+          - type: custom:translite-mixer-card
+            title: ""
             grid_options:
               columns: 12
-          - type: tile
-            entity: number.translite_music_volume
-            name: Addams music (Pi)
-            icon: mdi:hand-clap
-            color: deep-purple
-            features:
-              - type: numeric-input
-                style: slider
-            grid_options:
-              columns: 12
-          - type: tile
-            entity: number.translite_radio_volume
-            name: Radio (Pi)
-            icon: mdi:radio
-            color: teal
-            features:
-              - type: numeric-input
-                style: slider
-            grid_options:
-              columns: 12
+              rows: 6
 
       # ---------- lights ----------
       - type: grid
