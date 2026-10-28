@@ -48,6 +48,11 @@ def main(argv):
       elif opt in ("-k", "--knock"):
          knock = arg
 
+   # called without a file (at boot from MQTTWrapper.sh): just mute the amp
+   if inputfile == '':
+      GPIO.cleanup()
+      sys.exit()
+
 #   print 'Volume ', volume
 #   print 'File ', inputfile
 #   print 'Start ', start 
@@ -57,26 +62,26 @@ def main(argv):
    pygame.mixer.music.load(inputfile)
    pygame.mixer.music.play()
    vset = True
+   pendingKnocks = sorted(int(k) for k in knock.split("|") if k != '')
    while pygame.mixer.music.get_busy() == True:
        position = pygame.mixer.music.get_pos()
 #       print position
-       checkForKnock(knock, position)
+       # the loop never lands exactly on a millisecond, so knock as soon as a marker is passed
+       while pendingKnocks and position >= pendingKnocks[0]:
+           pendingKnocks.pop(0)
+           knock(KNOCKER_LEFT)
        if position  >= int(stop):
 #           print "min"
            amp.set_volume(0)
+           GPIO.cleanup()
            sys.exit()
        elif position >= int(start) and position < int(stop) and vset:
 #           print "max"
            amp.set_volume(int(volume))
            vset = False
-       continue
+       time.sleep(0.005)
+   amp.set_volume(0)
    GPIO.cleanup()
-
-def checkForKnock(knocks, currentPos):
-    knocksList = knocks.split("|")
-    for sknock in knocksList:
-       if int(sknock) == currentPos:
-          knock(KNOCKER_LEFT)
 
 def knock(pin):
     GPIO.output(pin,GPIO.HIGH)
