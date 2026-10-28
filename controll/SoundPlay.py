@@ -1,6 +1,9 @@
 #!/usr/bin/python
 
 import sys, getopt
+import os
+import signal
+import subprocess
 import pygame
 import time
 import RPi.GPIO as GPIO
@@ -20,13 +23,19 @@ GPIO.setup(40, GPIO.OUT)
 KNOCKER_LEFT = 40
 KNOCKER_RIGHT = 38
 
+#fade out at the stop marker instead of cutting the music off
+FADE_OUT_MS = 3000
+#Pi analog output level in 1/100 dB. Full level from the Pi and less gain on the
+#amplifier keeps the Pi's own noise down (it was -17.25dB with the amp near max)
+PI_OUTPUT_LEVEL = 0
+
 MESSAGE = 'test.py -v <volume> -i <wavfile> -s <startmarker> -t <stopmarker> -k <knockeventsmarker>'
 
 def main(argv):
    inputfile = ''
    start = ''
    stop = ''
-   knock = ''
+   knockMarkers = ''
    volume = ''
    try:
       opts, args = getopt.getopt(argv,"hv:i:s:t:k:",["volume=","ifile=","start=","stop=","knock="])
@@ -46,23 +55,25 @@ def main(argv):
       elif opt in ("-t", "--stop"):
          stop = arg
       elif opt in ("-k", "--knock"):
-         knock = arg
+         knockMarkers = arg
 
    # called without a file (at boot from MQTTWrapper.sh): just mute the amp
    if inputfile == '':
-      GPIO.cleanup()
-      sys.exit()
+      return
 
 #   print 'Volume ', volume
 #   print 'File ', inputfile
 #   print 'Start ', start 
 #   print 'Stop ', stop
 #   print 'Knock ', knock
+   subprocess.call(["amixer", "-q", "cset", "numid=1", str(PI_OUTPUT_LEVEL)])
+   # there is no pulseaudio here; going straight to ALSA avoids its errors
+   os.environ["SDL_AUDIODRIVER"] = "alsa"
    pygame.mixer.init()
    pygame.mixer.music.load(inputfile)
    pygame.mixer.music.play()
    vset = True
-   pendingKnocks = sorted(int(k) for k in knock.split("|") if k != '')
+   pendingKnocks = sorted(int(k) for k in knockMarkers.split("|") if k != '')
    while pygame.mixer.music.get_busy() == True:
        position = pygame.mixer.music.get_pos()
 #       print position
@@ -72,16 +83,14 @@ def main(argv):
            knock(KNOCKER_LEFT)
        if position  >= int(stop):
 #           print "min"
-           amp.set_volume(0)
-           GPIO.cleanup()
-           sys.exit()
+           pygame.mixer.music.fadeout(FADE_OUT_MS)
+           time.sleep(FADE_OUT_MS / 1000.0)
+           break
        elif position >= int(start) and position < int(stop) and vset:
 #           print "max"
            amp.set_volume(int(volume))
            vset = False
        time.sleep(0.005)
-   amp.set_volume(0)
-   GPIO.cleanup()
 
 def knock(pin):
     GPIO.output(pin,GPIO.HIGH)
@@ -89,6 +98,18 @@ def knock(pin):
     GPIO.output(pin,GPIO.LOW)
     return
 
+def on_sigterm(signum, frame):
+    # turns SIGTERM (sound switched off from mqtt) into a normal exit, so the finally below runs
+    sys.exit(0)
+
 if __name__ == "__main__":
-   main(sys.argv[1:])
+   signal.signal(signal.SIGTERM, on_sigterm)
+   try:
+      main(sys.argv[1:])
+   finally:
+      # however we got here: knocker released, amplifier muted
+      GPIO.output(KNOCKER_LEFT, GPIO.LOW)
+      GPIO.output(KNOCKER_RIGHT, GPIO.LOW)
+      amp.set_volume(0)
+      GPIO.cleanup()
 

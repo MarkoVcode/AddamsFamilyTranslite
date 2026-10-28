@@ -1,0 +1,106 @@
+# Home Assistant MQTT config for the Addams Family translite (TRANSLITE-1).
+# Paste into configuration.yaml (merge with an existing "mqtt:" section).
+#
+# Commands use retain: true, so the broker remembers them and the Pi gets them
+# back after a restart. The Pi also saves them on its SETTINGS partition, in case
+# the broker loses its retained messages. PLAY is a button and must NOT be retained.
+
+mqtt:
+  switch:
+    - name: "Translite backlight"
+      unique_id: translite_backlight
+      command_topic: "cmnd/TRANSLITE-1/BACKLIGHT"
+      state_topic: "stat/TRANSLITE-1/BACKLIGHT"
+      retain: true
+      availability_topic: "tele/TRANSLITE-1/LWT"
+      payload_available: "Online"
+      payload_not_available: "Offline"
+      icon: mdi:television-ambient-light
+
+    - name: "Translite daily music"
+      unique_id: translite_sound
+      command_topic: "cmnd/TRANSLITE-1/SOUND"
+      state_topic: "stat/TRANSLITE-1/SOUND"
+      retain: true
+      availability_topic: "tele/TRANSLITE-1/LWT"
+      payload_available: "Online"
+      payload_not_available: "Offline"
+      icon: mdi:music
+
+    - name: "Translite blink effects"
+      unique_id: translite_effects
+      command_topic: "cmnd/TRANSLITE-1/EFFECTS"
+      state_topic: "stat/TRANSLITE-1/EFFECTS"
+      retain: true
+      availability_topic: "tele/TRANSLITE-1/LWT"
+      payload_available: "Online"
+      payload_not_available: "Offline"
+      icon: mdi:flash
+
+  number:
+    # 100 = normal light-sensor curve, 50 = everything half as bright
+    - name: "Translite backlight level"
+      unique_id: translite_backlight_level
+      command_topic: "cmnd/TRANSLITE-1/BCKL-LEVEL"
+      state_topic: "stat/TRANSLITE-1/BCKL-LEVEL"
+      min: 10
+      max: 200
+      step: 5
+      unit_of_measurement: "%"
+      retain: true
+      availability_topic: "tele/TRANSLITE-1/LWT"
+      payload_available: "Online"
+      payload_not_available: "Offline"
+      icon: mdi:brightness-6
+
+    # MAX9744 amplifier volume, 0-63
+    - name: "Translite volume"
+      unique_id: translite_volume
+      command_topic: "cmnd/TRANSLITE-1/VOLUME"
+      state_topic: "stat/TRANSLITE-1/VOLUME"
+      min: 0
+      max: 63
+      step: 1
+      retain: true
+      availability_topic: "tele/TRANSLITE-1/LWT"
+      payload_available: "Online"
+      payload_not_available: "Offline"
+      icon: mdi:volume-high
+
+  button:
+    - name: "Translite play music"
+      unique_id: translite_play
+      command_topic: "cmnd/TRANSLITE-1/PLAY"
+      payload_press: "ON"
+      retain: false
+      availability_topic: "tele/TRANSLITE-1/LWT"
+      payload_available: "Online"
+      payload_not_available: "Offline"
+      icon: mdi:play
+
+  sensor:
+    - name: "Translite light sensor"
+      unique_id: translite_light
+      state_topic: "tele/TRANSLITE-1/SENSOR"
+      value_template: "{{ value_json.Local.Light1 }}"
+      icon: mdi:brightness-percent
+
+    - name: "Translite backlight brightness"
+      unique_id: translite_backlight_actual
+      state_topic: "tele/TRANSLITE-1/SENSOR"
+      value_template: "{{ value_json.Local.Backlight }}"
+      icon: mdi:television-ambient-light
+
+  # External LED channels 1-4 (copy the block for CH2..CH4)
+  light:
+    - name: "Translite external CH1"
+      unique_id: translite_ext_ch1
+      command_topic: "cmnd/TRANSLITE-1/EXT-POWER-CH1"
+      state_topic: "stat/TRANSLITE-1/EXT-POWER-CH1"
+      brightness_command_topic: "cmnd/TRANSLITE-1/EXT-BRIGHT-CH1"
+      brightness_state_topic: "stat/TRANSLITE-1/EXT-BRIGHT-CH1"
+      brightness_scale: 255
+      retain: true
+      availability_topic: "tele/TRANSLITE-1/LWT"
+      payload_available: "Online"
+      payload_not_available: "Offline"

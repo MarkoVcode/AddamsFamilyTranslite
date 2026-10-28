@@ -5,20 +5,22 @@ import piglow
 import json
 import subprocess
 from datetime import datetime
+from Adafruit_MAX9744 import MAX9744
 from lib.sensorLight import sensorLight
 from lib.backlightEffects import backlightEffects
+from lib.settingsStore import settingsStore
 
 DEVICE_NAME="TRANSLITE-1"
 BROKER_ADDRESS="192.168.1.20"
-ITEMS_AD=[]
-ITEMS_PC=["BCKL-BRIGHT", "VOLUME", "EXT-BRIGHT-CH1", "EXT-BRIGHT-CH2", "EXT-BRIGHT-CH3", "EXT-BRIGHT-CH4"]
-ITEMS_LOGICAL=["BCKL-AUTOMODE"]
-ITEMS_TRIGGER=["PLAY"]
 VALID_ON_OFF_VALUES=["ON", "OFF"]
 
 #seconds
 DELAY_ON_TELEMETRY_UPDATE = 60
 MAX_OFFLINE_TIME = 300
+#wait for the last change before writing, so dragging a slider is one write
+SAVE_DELAY = 10
+#how long to collect our own retained stat messages when the settings file is missing
+RESTORE_TIME = 3
 
 #daily music + knocker, local time (hour, minute)
 PLAY_AT = (12, 0)
@@ -26,7 +28,11 @@ AUDIO_TRACK = "1"
 #MAX9744 amplifier range
 MAX_VOLUME = 63
 
-#Main display 
+#NOOBS SETTINGS partition (/dev/mmcblk0p3), mounted read-only
+SETTINGS_MOUNT = "/mnt/settings"
+SETTINGS_FILE = "translite/settings.json"
+
+#Main display
 C_1 = 13
 C_2 = 14
 C_3 = 15
@@ -35,6 +41,7 @@ C_5 = 5
 C_6 = 4
 C_7 = 18
 C_8 = 2
+SCREEN_LEDS = [C_1, C_2, C_3, C_4, C_5, C_6, C_7, C_8]
 
 #External LED
 #HEADER 3:
@@ -45,6 +52,31 @@ E_4 = 3
 E_2 = 12
 #HEADER 1:
 E_1 = 11
+EXT_LEDS = {"CH1": E_1, "CH2": E_2, "CH3": E_3, "CH4": E_4}
+
+# Every setting has cmnd/TRANSLITE-1/<NAME> and a retained stat/TRANSLITE-1/<NAME>
+SWITCHES = ["BACKLIGHT", "SOUND", "EFFECTS",
+            "EXT-POWER-CH1", "EXT-POWER-CH2", "EXT-POWER-CH3", "EXT-POWER-CH4"]
+#name: (min, max)
+NUMBERS = {"BCKL-LEVEL": (10, 200),
+           "VOLUME": (0, MAX_VOLUME),
+           "EXT-BRIGHT-CH1": (0, 255), "EXT-BRIGHT-CH2": (0, 255),
+           "EXT-BRIGHT-CH3": (0, 255), "EXT-BRIGHT-CH4": (0, 255)}
+
+DEFAULT_SETTINGS = {
+    "BACKLIGHT": "ON",
+    #percent of the light sensor curve
+    "BCKL-LEVEL": 100,
+    "VOLUME": 60,
+    #daily music at PLAY_AT
+    "SOUND": "ON",
+    #random backlight blinks
+    "EFFECTS": "ON",
+    "EXT-POWER-CH1": "OFF", "EXT-BRIGHT-CH1": 0,
+    "EXT-POWER-CH2": "OFF", "EXT-BRIGHT-CH2": 0,
+    "EXT-POWER-CH3": "OFF", "EXT-BRIGHT-CH3": 0,
+    "EXT-POWER-CH4": "OFF", "EXT-BRIGHT-CH4": 0,
+}
 
 class SensorList:
     def __init__(self):
@@ -52,8 +84,9 @@ class SensorList:
         self.Temperature2 = None
         self.Light1 = None
         self.Light2 = None
+        self.Backlight = None
     def reprJSON(self):
-        return dict(Temperature1=self.Temperature1, Temperature2=self.Temperature2, Light1=self.Light1, Light2=self.Light2)   
+        return dict(Temperature1=self.Temperature1, Temperature2=self.Temperature2, Light1=self.Light1, Light2=self.Light2, Backlight=self.Backlight)
 
 class Sensors:
     def __init__(self):
@@ -69,118 +102,8 @@ class SystemState:
     def reprJSON(self):
         return dict(Time=self.Time, SysUptime=self.SysUptime)
 
-class DeviceState:
-    def __init__(self):
-        self.ch1 = 0
-        self.ch1State = "OFF"
-        self.ch2 = 0
-        self.ch2State = "OFF"
-        self.ch3 = 0
-        self.ch3State = "OFF"
-        self.ch4 = 0
-        self.ch4State = "OFF"
-        self.backl = 0
-        #backlight is on and follows the light sensor until told otherwise
-        self.backlState = "ON"
-        self.backlAuto = "ON"
-        self.vol = 0
-
-    def setADBrightness(self, item, value):
-        value = int(value)
-        if item == 'BCKL-BRIGHT':
-            #a brightness from mqtt overrides the light sensor
-            self.backl = value
-            self.backlAuto = "OFF"
-        elif item == 'VOLUME':
-            self.vol = min(value, MAX_VOLUME)
-        elif item == 'EXT-BRIGHT-CH1':
-            self.ch1 = value
-        elif item == 'EXT-BRIGHT-CH2':
-            self.ch2 = value
-        elif item == 'EXT-BRIGHT-CH3':
-            self.ch3 = value
-        elif item == 'EXT-BRIGHT-CH4':
-            self.ch4 = value
-        return True
-
-    def setADOnOff(self, item, value):
-        if item == 'BCKL-BRIGHT':
-            self.backlState = value
-        elif item == 'EXT-BRIGHT-CH1':
-            self.ch1State = value
-        elif item == 'EXT-BRIGHT-CH2':
-            self.ch2State = value
-        elif item == 'EXT-BRIGHT-CH3':
-            self.ch3State = value
-        elif item == 'EXT-BRIGHT-CH4':
-            self.ch4State = value
-        return True
-
-    def setAutoMode(self, value):
-        self.backlAuto = value
-        return True
-
-    # only called from the main loop, so the LEDs are driven from one thread.
-    # Returns the brightness the main display was set to.
-    def setDeviceStates(self, sensorBrightness):
-        if self.backlState != 'ON':
-            screen = 0
-        elif self.backlAuto == 'ON':
-            screen = sensorBrightness
-        else:
-            screen = int(self.backl)
-        self.setScreenBrightness(screen)
-
-        if self.ch1State == 'ON':       
-            self.setChannelBrightness("CH1", int(self.ch1))
-        else:
-            self.setChannelBrightness("CH1", 0)
-       
-        if self.ch2State == 'ON':
-            self.setChannelBrightness("CH2", int(self.ch2))
-        else:
-            self.setChannelBrightness("CH2", 0)
-     
-        if self.ch3State == 'ON':
-            self.setChannelBrightness("CH3", int(self.ch3))
-        else:
-            self.setChannelBrightness("CH3", 0)
-
-        if self.ch4State == 'ON':
-            self.setChannelBrightness("CH4", int(self.ch4))
-        else:
-            self.setChannelBrightness("CH4", 0)
-
-        piglow.show()
-        return screen
-
-    def setChannelBrightness(self, channel, brigthness):
-        if channel == 'CH1':
-            piglow.led(E_1,brigthness)
-        elif channel == 'CH2':
-            piglow.led(E_2,brigthness)
-        elif channel == 'CH3':
-            piglow.led(E_3,brigthness)
-        elif channel == 'CH4':
-            piglow.led(E_4,brigthness)
-
-
-    def setScreenBrightness(self, brigthness):
-        piglow.led(C_1,brigthness)
-        piglow.led(C_2,brigthness)
-        piglow.led(C_3,brigthness)
-        piglow.led(C_4,brigthness)
-        piglow.led(C_5,brigthness)
-        piglow.led(C_6,brigthness)
-        piglow.led(C_7,brigthness)
-        piglow.led(C_8,brigthness)
-
-
-    def reprJSON(self):
-        return dict(CH1=self.ch1, CH2=self.ch2, CH3=self.ch3, CH4=self.ch4, VOL=self.vol, BACKL=self.backl, BACKLAUTO=self.backlAuto)
-
 ############
-# Same mapping as the old BacklightControllerBrightness.py: high reading = dark room = dim
+# Same curve as the old BacklightControllerBrightness.py: high reading = dark room = dim
 def convertToBrightness(data):
     if data >=  850:
         return 10
@@ -202,6 +125,25 @@ def convertToBrightness(data):
         return 0
 
 ############
+# Only called from the main loop, so the LEDs are driven from one thread.
+# Returns the brightness the main display was set to.
+def applyLights(sensorBrightness):
+    if settings["BACKLIGHT"] == "ON":
+        #BCKL-LEVEL moves the whole curve up or down
+        screen = min(255, sensorBrightness * settings["BCKL-LEVEL"] // 100)
+    else:
+        screen = 0
+    for led in SCREEN_LEDS:
+        piglow.led(led, screen)
+    for channel, led in EXT_LEDS.items():
+        if settings["EXT-POWER-" + channel] == "ON":
+            piglow.led(led, settings["EXT-BRIGHT-" + channel])
+        else:
+            piglow.led(led, 0)
+    piglow.show()
+    return screen
+
+############
 def load_properties(path):
     props = {}
     for line in open(path):
@@ -218,10 +160,12 @@ def play_sound():
     if soundProcess is not None and soundProcess.poll() is None:
         print("sound already playing")
         return False
+    #re-read every time, so knock markers can be tuned without a restart
+    audio = load_properties("config/audio.properties")
     track = "af.soundplay.%s." + AUDIO_TRACK
-    print("playing " + audio[track % "track"] + " at volume " + str(deviceStates.vol))
+    print("playing " + audio[track % "track"] + " at volume " + str(settings["VOLUME"]))
     soundProcess = subprocess.Popen(["/usr/bin/python", "SoundPlay.py",
-        "-v", str(deviceStates.vol),
+        "-v", str(settings["VOLUME"]),
         "-i", audio["af.soundtrack.path"] + "/" + audio[track % "track"],
         "-s", audio[track % "start"],
         "-t", audio[track % "stop"],
@@ -229,22 +173,62 @@ def play_sound():
     return True
 
 ############
-def on_message(client, userdata, message):
-    recivedMessage = str(message.payload.decode("utf-8"))
-    topicPath = message.topic.split("/")
-    print("message received " ,recivedMessage)
-    print("message topic=",message.topic)
-    print("message qos=",message.qos)
-    print("message retain flag=",message.retain)
-    if (execute_request(topicPath[2], recivedMessage)):
-        send_confirmation(topicPath, message.topic, recivedMessage)
+def stop_sound():
+    if soundProcess is not None and soundProcess.poll() is None:
+        print("stopping sound")
+        #SoundPlay.py mutes the amp and releases the knocker on SIGTERM
+        soundProcess.terminate()
 
 ############
-def send_confirmation(topicPath, topic, message):
-    statTopic = topic.replace("cmnd", "stat")
-    client.publish(statTopic,message)
-    resultMessage = json.dumps(deviceStates.reprJSON())
-    client.publish("stat/" + DEVICE_NAME + "/RESULT",resultMessage)
+def on_message(client, userdata, message):
+    recivedMessage = str(message.payload.decode("utf-8")).strip()
+    topicPath = message.topic.split("/")
+    print("message received " + message.topic + " = " + recivedMessage + (" (retained)" if message.retain else ""))
+    if len(topicPath) != 3:
+        return
+    if topicPath[0] == "stat":
+        #only subscribed while restoring: our own last published state
+        if restoring and message.retain and topicPath[2] != "RESULT" and topicPath[2] in settings:
+            execute_request(topicPath[2], recivedMessage, message.retain)
+    elif execute_request(topicPath[2], recivedMessage, message.retain):
+        publish_state()
+
+############
+def execute_request(item, value, retained):
+    global lastChange
+    if item == "PLAY":
+        #a retained PLAY would start the music on every reconnect
+        if retained:
+            print("ignoring retained PLAY")
+            return False
+        return play_sound()
+    elif item in SWITCHES:
+        if value not in VALID_ON_OFF_VALUES:
+            print("the value is not ON or OFF")
+            return False
+        settings[item] = value
+    elif item in NUMBERS:
+        low, high = NUMBERS[item]
+        #home assistant may send "60.0"
+        settings[item] = max(low, min(high, int(float(value))))
+    elif item.startswith("EXT-BRIGHT-CH") and value in VALID_ON_OFF_VALUES:
+        #old style: ON/OFF sent to the brightness topic
+        settings["EXT-POWER-" + item[-3:]] = value
+    else:
+        print("unknown item " + item)
+        return False
+
+    if item == "SOUND" and value == "OFF":
+        stop_sound()
+    lastChange = time.time()
+    return True
+
+############
+# retained, so Home Assistant shows the real state after it or the broker restarts
+def publish_state():
+    for key, value in settings.items():
+        client.publish("stat/" + DEVICE_NAME + "/" + key, str(value), retain=True)
+    client.publish("stat/" + DEVICE_NAME + "/RESULT", json.dumps(settings), retain=True)
 
 ############
 def send_telemetry():
@@ -253,42 +237,10 @@ def send_telemetry():
     sensorsData.Local.Temperature2 = 12.3
     sensorsData.Local.Light1 = lightSensor.ext_level
     sensorsData.Local.Light2 = lightSensor.int_level
+    sensorsData.Local.Backlight = screen
     deviceState = SystemState()
     client.publish("tele/" + DEVICE_NAME + "/SENSOR", json.dumps(sensorsData.reprJSON()))
     client.publish("tele/" + DEVICE_NAME + "/STATE", json.dumps(deviceState.reprJSON()))
-#create JSON here with sensors and timestamps:
-
-############
-def execute_request(item, value):
-    if item in ITEMS_AD:
-        values = value.split(",")
-        value = values[0]
-        if 0 <= int(value) <= 255:
-            print("the value is valid AD - execute")
-            return deviceStates.setADBrightness(item, value)
-        else:
-            print("the value is not between 0 and 255")
-            return False
-    elif item in ITEMS_LOGICAL:
-        if value in VALID_ON_OFF_VALUES:
-            print("the value is valid LOGIC - execute")
-            return deviceStates.setAutoMode(value)
-        else:
-            print("the value is not ON or OFF")
-            return False
-    elif item in ITEMS_PC:
-        if value == "ON" or value == "OFF":
-            print("the value is valid ON/OFF - execute")
-            return deviceStates.setADOnOff(item, value)
-        elif 0 <= int(value) <= 255:
-            print("the value is valid AD - execute")
-            return deviceStates.setADBrightness(item, value)
-        else:
-            print("the value is not 0 - 255")
-            return False
-    elif item in ITEMS_TRIGGER:
-        return play_sound()
-
 
 ############
 # Called on every (re)connect. Subscriptions are lost when the broker drops
@@ -301,8 +253,19 @@ def on_connect(client, userdata, flags, rc):
     print("connected to broker")
     connected = True
     lastConnected = time.time()
-    client.subscribe("cmnd/" + DEVICE_NAME + "/#")
     client.publish(LWT_TOPIC, "Online", retain=True)
+    if restoring:
+        #read our retained state before publishing anything, or we would overwrite it
+        print("no settings file - restoring settings from retained mqtt state")
+        client.subscribe("stat/" + DEVICE_NAME + "/#")
+    else:
+        start_commands()
+
+############
+def start_commands():
+    publish_state()
+    #retained commands arrive right after this and override the saved settings
+    client.subscribe("cmnd/" + DEVICE_NAME + "/#")
     send_telemetry()
 
 ############
@@ -321,17 +284,27 @@ def safe_on_message(client, userdata, message):
     except Exception as e:
         print("error handling message on " + message.topic + ": " + repr(e))
 
-deviceStates = DeviceState()
+audio = load_properties("config/audio.properties")
+DEFAULT_SETTINGS["VOLUME"] = min(int(audio["af.soundplay.volume." + AUDIO_TRACK]), MAX_VOLUME)
+
+store = settingsStore(SETTINGS_MOUNT, SETTINGS_FILE)
+settings = store.load(DEFAULT_SETTINGS)
+savedSettings = dict(settings)
+lastChange = 0
+#file missing or broken: take the settings from the broker on the first connect
+restoring = not store.loaded
+restoreStarted = None
+
+amp = MAX9744()
+amp.set_volume(0)
+soundProcess = None
+lastPlayDay = None
+
 lightSensor = sensorLight()
 lightSensor.fetchValues()
 lightLevel = float(lightSensor.ext_level)
-effects = backlightEffects([C_1, C_2, C_3, C_4, C_5, C_6, C_7, C_8])
-
-audio = load_properties("config/audio.properties")
-#volume until mqtt sets one
-deviceStates.vol = min(int(audio["af.soundplay.volume." + AUDIO_TRACK]), MAX_VOLUME)
-soundProcess = None
-lastPlayDay = None
+effects = backlightEffects(SCREEN_LEDS)
+screen = 0
 
 LWT_TOPIC = "tele/" + DEVICE_NAME + "/LWT"
 connected = False
@@ -360,8 +333,8 @@ while True:
     lightSensor.fetchValues()
     #smooth the reading so the backlight does not jump between levels
     lightLevel = lightLevel * 0.9 + lightSensor.ext_level * 0.1
-    screen = deviceStates.setDeviceStates(convertToBrightness(lightLevel))
-    if screen > 0:
+    screen = applyLights(convertToBrightness(lightLevel))
+    if screen > 0 and settings["EFFECTS"] == "ON":
         if effects.doRandomBlink():
             effects.disturbOn(screen)
         if effects.doRandomEffect():
@@ -370,7 +343,35 @@ while True:
     today = datetime.now()
     if (today.hour, today.minute) == PLAY_AT and lastPlayDay != today.date():
         lastPlayDay = today.date()
-        play_sound()
+        if settings["SOUND"] == "ON":
+            play_sound()
+        else:
+            print("daily sound is switched off")
+
+    #whatever happened in SoundPlay.py, never leave the amp on afterwards
+    if soundProcess is not None and soundProcess.poll() is not None:
+        print("sound finished (exit code " + str(soundProcess.returncode) + "), amplifier muted")
+        soundProcess = None
+        amp.set_volume(0)
+
+    if restoring and connected:
+        if restoreStarted is None:
+            restoreStarted = now
+        elif now - restoreStarted >= RESTORE_TIME:
+            restoring = False
+            client.unsubscribe("stat/" + DEVICE_NAME + "/#")
+            print("restore finished: " + json.dumps(settings))
+            #write the file right away, so the next start does not depend on the broker
+            savedSettings = {}
+            lastChange = 0
+            start_commands()
+
+    if settings != savedSettings and now - lastChange >= SAVE_DELAY:
+        if store.save(settings):
+            savedSettings = dict(settings)
+        else:
+            #try again later rather than every 0.1s
+            lastChange = now
 
     if connected and now - lastTelemetry >= DELAY_ON_TELEMETRY_UPDATE:
         lastTelemetry = now
