@@ -121,17 +121,30 @@ mqtt:
       payload_not_available: "Offline"
       icon: mdi:volume-high
 
+  # unit + state_class make Home Assistant draw line graphs and keep statistics
   sensor:
+    # raw light sensor reading 0-1023, high = dark room
     - name: "Translite light sensor"
       unique_id: translite_light
       state_topic: "tele/TRANSLITE-1/SENSOR"
       value_template: "{{ value_json.Local.Light1 }}"
+      unit_of_measurement: "raw"
+      state_class: measurement
+      availability_topic: "tele/TRANSLITE-1/LWT"
+      payload_available: "Online"
+      payload_not_available: "Offline"
       icon: mdi:brightness-percent
 
+    # backlight LED level the Pi is driving right now, 0-154 (hard cap)
     - name: "Translite backlight brightness"
       unique_id: translite_backlight_actual
       state_topic: "tele/TRANSLITE-1/SENSOR"
       value_template: "{{ value_json.Local.Backlight }}"
+      unit_of_measurement: "level"
+      state_class: measurement
+      availability_topic: "tele/TRANSLITE-1/LWT"
+      payload_available: "Online"
+      payload_not_available: "Offline"
       icon: mdi:television-ambient-light
 
   # External LED channels 1-4 (copy the block for CH2..CH4)
